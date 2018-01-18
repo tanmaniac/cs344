@@ -24,8 +24,7 @@ if(CUDA_FOUND)
   -ccbin /usr/bin/g++; 
   -gencode;arch=compute_30,code=sm_30;  
   -gencode;arch=compute_35,code=sm_35;
-  -gencode;arch=compute_35,code=compute_35;
-  -gencode;arch=compute_20,code=sm_20")
+  -gencode;arch=compute_35,code=compute_35")
 
   # add -Wextra compiler flag for gcc compilations
   if (UNIX)
@@ -37,11 +36,11 @@ if(CUDA_FOUND)
   set(CUDA_NVCC_FLAGS_DEBUG ${CUDA_NVCC_FLAGS_DEBUG} "-G")
 
   add_subdirectory (Problem\ Sets/Problem\ Set\ 1)
-  #add_subdirectory (HW2)
-  #add_subdirectory (HW3)
-  #add_subdirectory (HW4)
-  #add_subdirectory (HW5)
-  #add_subdirectory (HW6)
+  add_subdirectory (Problem\ Sets/Problem\ Set\ 2)
+  add_subdirectory (Problem\ Sets/Problem\ Set\ 3)
+  add_subdirectory (Problem\ Sets/Problem\ Set\ 4)
+  add_subdirectory (Problem\ Sets/Problem\ Set\ 5)
+  add_subdirectory (Problem\ Sets/Problem\ Set\ 6)
 else(CUDA_FOUND)
   message("CUDA is not installed on this system.")
 endif()
