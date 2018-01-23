@@ -1,22 +1,34 @@
-#include <array>
-#include <chrono>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <array>
+#include <chrono>
 #include <iostream>
 #include <numeric>
+#include <sstream>
 
-extern void launchScanKernel(int *h_dataOut, const int *h_dataIn, const size_t dataSize);
+extern void launchScanKernel(int* h_dataOut,
+                             const int* h_dataIn,
+                             const size_t dataSize,
+                             float* execTime = nullptr);
 
 template <typename T, std::size_t size>
-void serialExclusiveScan(const std::array<T, size>& dataIn, std::array<T, size>& dataOut){
+void serialExclusiveScan(const std::array<T, size>& dataIn, std::array<T, size>& dataOut) {
     dataOut[0] = 0;
     for (auto i = 1; i < dataIn.size(); i++) {
-        dataOut[i] = dataOut[i-1] + dataIn[i - 1];
+        dataOut[i] = dataOut[i - 1] + dataIn[i - 1];
     }
 }
 
-int main(int argc, char **argv)
-{
+template <typename T, std::size_t size>
+std::string printArray(const std::array<T, size>& inputArray) {
+    std::stringstream out;
+    for (const auto& val : inputArray) {
+        out << val << " ";
+    }
+    return out.str();
+}
+
+int main(int argc, char** argv) {
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
     if (deviceCount == 0) {
@@ -27,12 +39,13 @@ int main(int argc, char **argv)
     cudaSetDevice(dev);
 
     cudaDeviceProp devProps;
-    if (cudaGetDeviceProperties(&devProps, dev) == 0)
-    {
+    if (cudaGetDeviceProperties(&devProps, dev) == 0) {
         printf("Using device %d:\n", dev);
         printf("%s; global mem: %dB; compute v%d.%d; clock: %d kHz\n",
-               devProps.name, (int)devProps.totalGlobalMem, 
-               (int)devProps.major, (int)devProps.minor, 
+               devProps.name,
+               (int)devProps.totalGlobalMem,
+               (int)devProps.major,
+               (int)devProps.minor,
                (int)devProps.clockRate);
     }
 
@@ -47,23 +60,18 @@ int main(int argc, char **argv)
     serialExclusiveScan(dataIn, dataOut);
     auto end = std::chrono::high_resolution_clock::now();
     auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
-    std::cout << "CPU execution took " << time.count() << " ns" << std::endl; 
+    std::cout << "CPU execution took " << time.count() << " ns" << std::endl;
 
-    std::cout << "CPU result = [ ";
-    for (const auto& val : dataOut) {
-        std::cout << val << " ";
-    }
-    std::cout << "]" << std::endl;
+    std::cout << "CPU result = [ " << printArray(dataOut) << "]" << std::endl;
 
     // Run GPU implementation of exclusive scan
     std::array<int, ARRAY_SIZE> gpuDataOut;
-    launchScanKernel(gpuDataOut.data(), dataIn.data(), ARRAY_SIZE);
+    float gpuExecTime = 0;
+    launchScanKernel(gpuDataOut.data(), dataIn.data(), ARRAY_SIZE, &gpuExecTime);
 
-    std::cout << "GPU result = [ ";
-    for (const auto& val : gpuDataOut) {
-        std::cout << val << " ";
-    }
-    std::cout << "]" << std::endl;
+    static constexpr int NS_IN_A_MS = 1000000; // 1000000 nanoseconds in one millisecond
+    std::cout << "GPU execution took " << gpuExecTime * NS_IN_A_MS << " ns" << std::endl;
+    std::cout << "GPU result = [ " << printArray(gpuDataOut) << "]" << std::endl;
 
     return 0;
 }

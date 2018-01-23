@@ -10,4 +10,4 @@ file( GLOB  hdr *.hpp *.h )
 file( GLOB  cu  *.cu )
 file( GLOB  src *.cpp )
     
-CUDA_ADD_EXECUTABLE(GPUAlgos ${src} ${hdr} ${cu})
+CUDA_ADD_EXECUTABLE(Scan ${src} ${hdr} ${cu})

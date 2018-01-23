@@ -38,11 +38,16 @@ __global__ void exclusiveScanKernel(T *dataOut, const T *dataIn, const size_t da
 
 //template <typename T>
 //void launchScanKernel(T *h_dataOut, const T *h_dataIn, const size_t dataSize) {
-void launchScanKernel(int *h_dataOut, const int *h_dataIn, const size_t dataSize) {
+void launchScanKernel(int *h_dataOut, const int *h_dataIn, const size_t dataSize, float *execTime = nullptr) {
     const size_t dataBytes = dataSize * sizeof(int);
 
     // Declare GPU memory pointers
     int *d_dataOut, *d_dataIn;
+
+    // Set up GPU timers
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
 
     // Allocate GPU memory
     cudaMalloc((void **) &d_dataOut, dataBytes);
@@ -50,10 +55,18 @@ void launchScanKernel(int *h_dataOut, const int *h_dataIn, const size_t dataSize
 
     cudaMemcpy(d_dataIn, h_dataIn, dataBytes, cudaMemcpyHostToDevice);
 
+    // Execute kernel and record runtime
+    cudaEventRecord(start);
     exclusiveScanKernel<<<1, dataSize, 2 * dataBytes>>>(d_dataOut, d_dataIn, dataSize);
+    cudaEventRecord(stop);
 
     // Copy back from GPU to CPU
     cudaMemcpy(h_dataOut, d_dataOut, dataBytes, cudaMemcpyDeviceToHost);
+
+    cudaEventSynchronize(stop);
+    float timeInMs = 0;
+    cudaEventElapsedTime(&timeInMs, start, stop);
+    *execTime = timeInMs;
 
     // Free memory
     cudaFree(d_dataIn);
