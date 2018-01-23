@@ -32,6 +32,15 @@ if(CUDA_FOUND)
     set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} "-Xcompiler -Wextra")
   endif (UNIX)
 
+  # Support g++ versions less than 6.0
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0)
+      set (CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} "-std=c++11")
+      set (CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} "-std=c++11")
+      set (CUDA_PROPAGATE_HOST_FLAGS OFF)
+    endif()
+  endif()
+
   # add debugging to CUDA NVCC flags.  For NVidia's NSight tools.
   set(CUDA_NVCC_FLAGS_DEBUG ${CUDA_NVCC_FLAGS_DEBUG} "-G")
 
