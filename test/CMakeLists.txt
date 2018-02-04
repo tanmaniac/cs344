@@ -9,7 +9,9 @@ include_directories(${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
 ##############
 
 file(GLOB PS3_TEST_FILES ps3/*.cpp)
-add_executable(ProblemSet3Tests ${PS3_TEST_FILES})
+CUDA_ADD_EXECUTABLE(ProblemSet3Tests ${PS3_TEST_FILES}
+                    ../Problem\ Sets/Problem\ Set\ 3/student_func.cu
+                    ../Problem\ Sets/Problem\ Set\ 3/utils.h)
 target_link_libraries(ProblemSet3Tests gtest gtest_main pthread)
 
 add_test(UnitTests ProblemSet3Tests)

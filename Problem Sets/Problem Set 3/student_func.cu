@@ -81,41 +81,153 @@
 
 #include "utils.h"
 
+#include <array>
+#include <cfloat>
+#include <cmath>
+#include <cstdint>
+#include <iostream>
+
+// Helper class to make generic 2-vector types
+// https://stackoverflow.com/a/17834484
+template <typename T, int cn> struct MakeVec;
+template <> struct MakeVec<float, 2> {
+    typedef float2 type;
+};
+
 __device__ inline int getPosition() {
     return blockIdx.x * blockDim.x + threadIdx.x;
 }
 
-__device__ inline boundsClamp(const int threadPos, const int offset, const size_t size) {
-    return threadPos + offset >= size ? threadPos : threadPos + offset;
+template <typename T>
+__device__ inline T cuda_min(T a, T b) {
+    return a < b ? a : b;
 }
 
 template <typename T>
-__global__ void minMaxKernel(T* d_in, size_t dataSize, T* d_out) {
-  static_assert(std::is_arithmetic<T>::value, "Only arithmetic types are supported");
+__device__ inline T cuda_max(T a, T b) {
+    return a > b ? a : b;
+}
+
+template <typename T>
+__global__ void minMaxBlockReduceKernel(const T* d_in, const size_t dataSize, T* d_mins, T* d_maxes) {
+    static_assert(std::is_arithmetic<T>::value, "Only arithmetic types are supported");
     const int threadPos = getPosition();
     const int threadId = threadIdx.x;
 
+    // Shared memory is an array of 2-vector types so we can interleave min and max values
+    typedef typename MakeVec<T, 2>::type vec2_type;
+    extern __shared__ vec2_type minMaxVals[];
+
+    // Copy values into shared memory. FLT_MAX is default value for min vals (everything is
+    // lower) and -FLT_MAX is default for max vals (everything is higher)
+    minMaxVals[threadId].x = threadPos < dataSize ? d_in[threadPos] : FLT_MAX;
+    minMaxVals[threadId].y = threadPos < dataSize ? d_in[threadPos] : -FLT_MAX;
+    __syncthreads();
+
     // Reduce this block
-    for (unsigned int s = blockDim.x >> 1; s > 0; s >>= 1) {
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (threadId < s) {
-            // Make sure we don't exceed the bounds of the array. If this thread's comparison index
-            // is outside the array bounds, just compare against itself.
-            int compareIndex = threadPos + s >= size ? threadPos : threadPos + offset;
-            d_in[threadPos].x = min(d_in[threadPos].x, d_in[compareIndex].x);
-            d_in[threadPos].y = max(d_in[threadPos].y, d_in[compareIndex].y);
+            minMaxVals[threadId].x = cuda_min(minMaxVals[threadId].x, minMaxVals[threadId + s].x);
+            minMaxVals[threadId].y = cuda_max(minMaxVals[threadId].y, minMaxVals[threadId + s].y);
         }
         __syncthreads();
     }
 
     // Only write to output array with thread 0
     if (threadId == 0) {
-        d_out[blockIdx.x] = d_in[threadPos];
+        d_mins[blockIdx.x] = minMaxVals[0].x;
+        d_maxes[blockIdx.x] = minMaxVals[0].y;
     }
 }
 
-void launchMinMaxKernel(float* d_logLuminance, float& min_logLum, float& max_logLum, const size_t dataSize) {
-    const size_t dataBytes = dataSize * sizeof (float2);
+template <typename T>
+__global__ void
+    minMaxWorkspaceKernel(T* d_mins, T* d_maxes, const size_t dataSize) {
+    static_assert(std::is_arithmetic<T>::value, "Only arithmetic types are supported");
+    const int threadPos = getPosition();
+    const int threadId = threadIdx.x;
 
+    // Define shared memory
+    typedef typename MakeVec<T, 2>::type vec2_type;
+    extern __shared__ vec2_type minMaxVals[];
+
+    // Copy values into shared memory. FLT_MAX is default value for min vals (everything is
+    // lower) and -FLT_MAX is default for max vals (everything is higher)
+    minMaxVals[threadId].x = threadPos < dataSize ? d_mins[threadPos] : FLT_MAX;
+    minMaxVals[threadId].y = threadPos < dataSize ? d_maxes[threadPos] : -FLT_MAX;
+    __syncthreads();
+
+    // Reduce this block
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (threadId < s) {
+            minMaxVals[threadId].x = cuda_min(minMaxVals[threadId].x, minMaxVals[threadId + s].x);
+            minMaxVals[threadId].y = cuda_max(minMaxVals[threadId].y, minMaxVals[threadId + s].y);
+        }
+        __syncthreads();
+    }
+
+    // Only write to output array with thread 0
+    if (threadId == 0) {
+        d_mins[0] = minMaxVals[0].x;
+        d_maxes[0] = minMaxVals[0].y;
+    }
+}
+
+// Round up to the nearest power of two
+// https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
+uint32_t roundUpToPow2(uint32_t val) {
+    val--;
+    val |= val >> 1;
+    val |= val >> 2;
+    val |= val >> 4;
+    val |= val >> 8;
+    val |= val >> 16;
+    val++;
+    return val;
+}
+
+void launchMinMaxKernel(const float* d_logLuminance,
+                        float& min_logLum,
+                        float& max_logLum,
+                        const size_t numRows,
+                        const size_t numCols) {
+
+    const int maxThreadsPerBlock = 1024;
+    size_t dataSize = numRows * numCols;
+    int threads = maxThreadsPerBlock;
+    // Determine how many blocks to run
+    int blocks = dataSize / threads + 1;
+
+    // Allocate enough memory to store min and max values from all the blocks
+    const size_t minMaxArrLen = blocks;
+    float *d_mins, *d_maxes;
+    float h_mins[minMaxArrLen], h_maxes[minMaxArrLen];
+    const size_t minMaxSize = minMaxArrLen * sizeof(float);
+    checkCudaErrors(cudaMalloc(&d_mins, minMaxSize));
+    checkCudaErrors(cudaMalloc(&d_maxes, minMaxSize));
+
+    // Using two float arrays for shared memory so we can compute min and max simultaneously
+    size_t shmSize = threads * sizeof(float2);
+    minMaxBlockReduceKernel<<<blocks, threads, shmSize>>>(
+        d_logLuminance, dataSize, d_mins, d_maxes);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+
+    // Want a power of 2 for the final reduce step
+    threads = roundUpToPow2(blocks);
+    // Use the previous number of blocks as the new dataSize
+    dataSize = blocks;
+    blocks = 1;
+    shmSize = threads * sizeof(float2);
+    minMaxWorkspaceKernel<<<blocks, threads, shmSize>>>(
+        d_mins, d_maxes, dataSize);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+
+    checkCudaErrors(cudaMemcpy(h_mins, d_mins, dataSize * sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(h_maxes, d_maxes, dataSize * sizeof(float), cudaMemcpyDeviceToHost));
+    min_logLum = h_mins[0];
+    max_logLum = h_maxes[0]; 
+    checkCudaErrors(cudaFree(d_mins));
+    checkCudaErrors(cudaFree(d_maxes));
 }
 
 void your_histogram_and_prefixsum(const float* const d_logLuminance,
@@ -130,15 +242,7 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
       1) find the minimum and maximum value in the input logLuminance channel
          store in min_logLum and max_logLum
     */
-    const int maxThreadsPerBlock = 1024;
-    const size_t dataSize = numRows * numCols;
-    int threads = maxThreadsPerBlock;
-    int blocks = dataSize / maxThreadsPerBlock;
-
-    // Using float2 for shared memory so we can interleave min and max values
-    const size_t shmSize = dataSize * sizeof(float2);
-    minMaxKernel<<<blocks, threads, shmSize>>>(d)
-
+    launchMinMaxKernel(d_logLuminance, min_logLum, max_logLum, numRows, numCols);
 
     // 2) subtract them to find the range
     /*3) generate a histogram of all the values in the logLuminance channel using
