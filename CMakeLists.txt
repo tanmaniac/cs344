@@ -52,8 +52,8 @@ if(CUDA_FOUND)
   #add_subdirectory (Problem\ Sets/Problem\ Set\ 5)
   #add_subdirectory (Problem\ Sets/Problem\ Set\ 6)
 
-  add_subdirectory(external)
-  add_subdirectory(test)
+  #add_subdirectory(external)
+  #add_subdirectory(test)
 
 else(CUDA_FOUND)
   message("CUDA is not installed on this system.")

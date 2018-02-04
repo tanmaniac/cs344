@@ -89,8 +89,10 @@
 
 // Helper class to make generic 2-vector types
 // https://stackoverflow.com/a/17834484
-template <typename T, int cn> struct MakeVec;
-template <> struct MakeVec<float, 2> {
+template <typename T, int cn>
+struct MakeVec;
+template <>
+struct MakeVec<float, 2> {
     typedef float2 type;
 };
 
@@ -109,7 +111,8 @@ __device__ inline T cuda_max(T a, T b) {
 }
 
 template <typename T>
-__global__ void minMaxBlockReduceKernel(const T* d_in, const size_t dataSize, T* d_mins, T* d_maxes) {
+__global__ void
+    minMaxBlockReduceKernel(const T* d_in, const size_t dataSize, T* d_mins, T* d_maxes) {
     static_assert(std::is_arithmetic<T>::value, "Only arithmetic types are supported");
     const int threadPos = getPosition();
     const int threadId = threadIdx.x;
@@ -141,8 +144,7 @@ __global__ void minMaxBlockReduceKernel(const T* d_in, const size_t dataSize, T*
 }
 
 template <typename T>
-__global__ void
-    minMaxWorkspaceKernel(T* d_mins, T* d_maxes, const size_t dataSize) {
+__global__ void minMaxWorkspaceKernel(T* d_mins, T* d_maxes, const size_t dataSize) {
     static_assert(std::is_arithmetic<T>::value, "Only arithmetic types are supported");
     const int threadPos = getPosition();
     const int threadId = threadIdx.x;
@@ -171,6 +173,63 @@ __global__ void
         d_mins[0] = minMaxVals[0].x;
         d_maxes[0] = minMaxVals[0].y;
     }
+}
+
+template <typename T>
+__global__ void globalHistoKernel(const T* const d_logLuminance,
+                                  T min_logLum,
+                                  T lumRange,
+                                  const size_t dataSize,
+                                  const size_t numBins,
+                                  unsigned int* d_bins) {
+    static_assert(std::is_arithmetic<T>::value, "Only arithmetic types are supported");
+    const int threadPos = getPosition();
+    // const int threadId = threadIdx.x;
+
+    if (threadPos >= dataSize) {
+        return;
+    }
+
+    // max_logLum will be at index 1024 in the cdf array:
+    // (max_logLum - min_logLum) / lumRange * numBins
+    // = lumRange / lumRange * numBins
+    // = numBins
+    // So just clamp the max index to numBins - 1
+    unsigned int bin =
+        cuda_min((unsigned int)((d_logLuminance[threadPos] - min_logLum) / lumRange * numBins),
+                 (unsigned int)(numBins - 1));
+
+    atomicAdd(&(d_bins[bin]), 1);
+}
+
+template <typename T>
+__global__ void hillisSteeleScanKernel(const T* const d_in, const size_t dataSize, T* d_out) {
+    extern __shared__ T shmData[];
+
+    int threadId = threadIdx.x;
+    int bufA = 0, bufB = 1;
+
+    // Load everything into shared memory. We need to copy twice to fill the shared memory space
+    shmData[bufA * dataSize + threadId] = (threadId == 0) ? 0 : d_in[threadId - 1];
+    shmData[bufB * dataSize + threadId] = (threadId == 0) ? 0 : d_in[threadId - 1];
+    __syncthreads();
+
+    for (int offset = 1; offset < dataSize; offset <<= 1) {
+        // Swap which side of the buffer we're writing into
+        bufA = 1 - bufA;
+        bufB = 1 - bufA;
+        // Do scan step
+        if (threadId >= offset) {
+            shmData[bufA * dataSize + threadId] =
+                shmData[bufB * dataSize + threadId] + shmData[bufB * dataSize + threadId - offset];
+        } else {
+            shmData[bufA * dataSize + threadId] = shmData[bufB * dataSize + threadId];
+        }
+
+        __syncthreads();
+    }
+    // Write to output array
+    d_out[threadId] = shmData[bufA * dataSize + threadId];
 }
 
 // Round up to the nearest power of two
@@ -210,7 +269,8 @@ void launchMinMaxKernel(const float* d_logLuminance,
     size_t shmSize = threads * sizeof(float2);
     minMaxBlockReduceKernel<<<blocks, threads, shmSize>>>(
         d_logLuminance, dataSize, d_mins, d_maxes);
-    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    cudaDeviceSynchronize();
+    checkCudaErrors(cudaGetLastError());
 
     // Want a power of 2 for the final reduce step
     threads = roundUpToPow2(blocks);
@@ -218,16 +278,45 @@ void launchMinMaxKernel(const float* d_logLuminance,
     dataSize = blocks;
     blocks = 1;
     shmSize = threads * sizeof(float2);
-    minMaxWorkspaceKernel<<<blocks, threads, shmSize>>>(
-        d_mins, d_maxes, dataSize);
-    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    minMaxWorkspaceKernel<<<blocks, threads, shmSize>>>(d_mins, d_maxes, dataSize);
+    cudaDeviceSynchronize();
+    checkCudaErrors(cudaGetLastError());
 
     checkCudaErrors(cudaMemcpy(h_mins, d_mins, dataSize * sizeof(float), cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaMemcpy(h_maxes, d_maxes, dataSize * sizeof(float), cudaMemcpyDeviceToHost));
     min_logLum = h_mins[0];
-    max_logLum = h_maxes[0]; 
+    max_logLum = h_maxes[0];
+
+    // Free memory
     checkCudaErrors(cudaFree(d_mins));
     checkCudaErrors(cudaFree(d_maxes));
+}
+
+void launchHistoKernel(const float* const d_logLuminance,
+                       float min_logLum,
+                       float lumRange,
+                       const size_t dataSize,
+                       const size_t numBins,
+                       unsigned int* const d_bins) {
+    const int maxThreadsPerBlock = 1024;
+    const int threads = maxThreadsPerBlock;
+    const int blocks = dataSize / threads + 1;
+
+    globalHistoKernel<<<blocks, threads>>>(
+        d_logLuminance, min_logLum, lumRange, dataSize, numBins, d_bins);
+    cudaDeviceSynchronize();
+    checkCudaErrors(cudaGetLastError());
+}
+
+void launchScanKernel(const unsigned int* const d_bins,
+                      const size_t numBins,
+                      unsigned int* d_cdf) {
+    // Shared memory size is double the size of the d_bins array since the kernel double buffers the
+    // input array
+    const size_t shmSize = numBins * sizeof(unsigned int) * 2;
+    // numBins is 1024, which is the maximum number of threads we can launch on a block, so we just
+    // use one block with numBins threads
+    hillisSteeleScanKernel<<<1, numBins, shmSize>>>(d_bins, numBins, d_cdf);
 }
 
 void your_histogram_and_prefixsum(const float* const d_logLuminance,
@@ -244,12 +333,26 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
     */
     launchMinMaxKernel(d_logLuminance, min_logLum, max_logLum, numRows, numCols);
 
-    // 2) subtract them to find the range
+    /* 2) subtract them to find the range
+    */
+    float range = max_logLum - min_logLum;
+    //std::cout << "Min = " << min_logLum << ", Max = " << max_logLum << ", Range = " << range
+    //          << std::endl;
+
     /*3) generate a histogram of all the values in the logLuminance channel using
          the formula: bin = (lum[i] - lumMin) / lumRange * numBins
     */
+    //std::cout << "NumBins = " << numBins << std::endl;
+    unsigned int* d_bins;
+    checkCudaErrors(cudaMalloc(&d_bins, numBins * sizeof(unsigned int)));
+    checkCudaErrors(cudaMemset(d_bins, 0, numBins * sizeof(unsigned int)));
+    launchHistoKernel(d_logLuminance, min_logLum, range, numRows * numCols, numBins, d_bins);
+
+    std::array<unsigned int, 1024> histo;
+    checkCudaErrors(cudaMemcpy(histo.data(), d_bins, numBins * sizeof(unsigned int), cudaMemcpyDeviceToHost));
     /*4) Perform an exclusive scan (prefix sum) on the histogram to get
          the cumulative distribution of luminance values (this should go in the
          incoming d_cdf pointer which already has been allocated for you)
     */
+    launchScanKernel(d_bins, numBins, d_cdf);
 }
