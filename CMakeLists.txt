@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
 project(cs344)
 
 # Only use required modules from OpenCV
-find_package(OpenCV REQUIRED core imgproc imgcodecs highgui)
+find_package(OpenCV REQUIRED core imgproc highgui)
 find_package(CUDA REQUIRED)
 
 link_libraries(${OpenCV_LIBS} )
@@ -22,10 +22,15 @@ if(CUDA_FOUND)
   # to make sure more people can easily run class code without knowing 
   # about this compiler argument
   set(CUDA_NVCC_FLAGS "
-  -ccbin g++; 
+  -ccbin g++;
   -gencode;arch=compute_30,code=sm_30;  
   -gencode;arch=compute_35,code=sm_35;
-  -gencode;arch=compute_35,code=compute_35")
+  -gencode;arch=compute_35,code=compute_35;
+  -gencode;arch=compute_50,code=sm_50;
+  -gencode;arch=compute_52,code=sm_52;
+  -gencode;arch=compute_60,code=sm_60;
+  -gencode;arch=compute_61,code=sm_61;
+  -gencode;arch=compute_62,code=sm_62")
 
   # add -Wextra compiler flag for gcc compilations
   if (UNIX)
@@ -43,17 +48,20 @@ if(CUDA_FOUND)
   endif()
 
   # add debugging to CUDA NVCC flags.  For NVidia's NSight tools.
-  set(CUDA_NVCC_FLAGS_DEBUG ${CUDA_NVCC_FLAGS_DEBUG} "-G")
+  # Seems to only work with CUDA 9+ for Problem Set 4
+  if (CUDA_VERSION_MAJOR GREATER 8)
+    set(CUDA_NVCC_FLAGS_DEBUG ${CUDA_NVCC_FLAGS_DEBUG} "-G")
+  endif()
 
   add_subdirectory (Problem\ Sets/Problem\ Set\ 1)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 2)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 3)
-  #add_subdirectory (Problem\ Sets/Problem\ Set\ 4)
+  add_subdirectory (Problem\ Sets/Problem\ Set\ 4)
   #add_subdirectory (Problem\ Sets/Problem\ Set\ 5)
   #add_subdirectory (Problem\ Sets/Problem\ Set\ 6)
 
-  #add_subdirectory(external)
-  #add_subdirectory(test)
+  add_subdirectory(external)
+  add_subdirectory(test)
 
 else(CUDA_FOUND)
   message("CUDA is not installed on this system.")
