@@ -46,73 +46,13 @@
 
  */
 
-template <typename T, size_t count>
-struct MakeVector;
-template <>
-struct MakeVector<unsigned int, 2> {
-    typedef uint2 type;
-};
+// Prevent memory bank access conflicts
+// https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch39.html
+static constexpr size_t NUM_BANKS = 16;
+static constexpr size_t LOG_NUM_BANKS = 4;
 
 __device__ inline unsigned int getPosition() {
-    return blockIdx.x * blockDim.x * threadIdx.x;
-}
-
-template <typename T>
-__device__ inline T cuda_min(T a, T b) {
-    return a < b ? a : b;
-}
-
-template <typename T>
-__device__ inline T cuda_max(T a, T b) {
-    return a > b ? a : b;
-}
-
-template <typename T>
-__global__ void copyToVec2(T* const d_inputVals,
-                           const size_t numElems,
-                           typename MakeVector<T, 2>::type* d_inputValsVector) {
-    static_assert(std::is_arithmetic<T>::value, "Only arithmetic types are supported");
-
-    unsigned int threadPos = getPosition();
-    if (threadPos < numElems) {
-        d_inputValsVector[threadPos].x = d_inputVals[threadPos];
-        d_inputValsVector[threadPos].y = d_inputVals[threadPos];
-    }
-}
-
-template <typename T>
-__global__ void minMaxKernel(T* d_inputValsVector,
-                             const size_t numElems) {
-    //static_assert(std::is_arithmetic<T>::value, "Only arithmetic types are supported");
-    const int threadPos = getPosition();
-    const int threadId = threadIdx.x;
-
-    // Shared memory is an array of 2-vector types so we can interleave min and max values
-    //typedef typename MakeVector<T, 2>::type vec2_type;
-    extern __shared__ T shmMinMaxVals[];
-
-    // Copy values into shared memory. FLT_MAX is default value for min vals (everything is
-    // lower) and -FLT_MAX is default for max vals (everything is higher)
-    shmMinMaxVals[threadId].x = threadPos < numElems ? d_inputValsVector[threadPos].x : FLT_MAX;
-    shmMinMaxVals[threadId].y = threadPos < numElems ? d_inputValsVector[threadPos].y : -FLT_MAX;
-    __syncthreads();
-
-    // Reduce this block
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (threadId < s) {
-            shmMinMaxVals[threadId].x =
-                cuda_min(shmMinMaxVals[threadId].x, shmMinMaxVals[threadId + s].x);
-            shmMinMaxVals[threadId].y =
-                cuda_max(shmMinMaxVals[threadId].y, shmMinMaxVals[threadId + s].y);
-        }
-        __syncthreads();
-    }
-
-    // Only write to output array with thread 0
-    if (threadId == 0) {
-        d_inputValsVector[blockIdx.x].x = shmMinMaxVals[0].x;
-        d_inputValsVector[blockIdx.x].y = shmMinMaxVals[0].y;
-    }
+    return blockIdx.x * blockDim.x + threadIdx.x;
 }
 
 // Round up to the nearest power of two
@@ -128,20 +68,99 @@ uint32_t roundUpToPow2(uint32_t val) {
     return val;
 }
 
+template <typename T>
+__global__ void predicateKernel(const T* const d_inputVals,
+                                const size_t numElems,
+                                const unsigned int pass,
+                                unsigned int* d_predicates) {
+    const unsigned int threadPos = getPosition();
+
+    if (threadPos < numElems) {
+        unsigned int mask = 1 << pass;
+        d_predicates[threadPos] = d_inputVals[threadPos] & mask == mask ? 1 : 0;
+    }
+}
+
+// Implementation of Blelloch exclusive scan
+// https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch39.html
+template <typename T>
+__global__ void
+    exclusiveScanKernel(const T* const d_inputVals, const size_t numElems, T* d_output) {
+    extern __shared__ T temp[];
+
+    const unsigned int threadId = threadIdx.x;
+    unsigned int offset = 1;
+
+    temp[2 * threadId] = d_inputVals[2 * threadId];
+    temp[2 * threadId + 1] = d_inputVals[2 * threadId + 1];
+
+    // Up-sweep (reduce) phase
+    for (int d = numElems >> 1; d > 0; d >>= 1) {
+        __syncthreads();
+        if (threadId < d) {
+            int ai = offset * (2 * threadId + 1) - 1;
+            int bi = offset * (2 * threadId + 2) - 1;
+            temp[bi] += temp[ai];
+        }
+        offset *= 2;
+    }
+
+    // Clear last element
+    if (threadId == 0) {
+        temp[numElems - 1] = 0;
+    }
+
+    // Down-sweep phase
+    for (int d = 1; d < numElems; d *= 2) {
+        offset >>= 1;
+        __syncthreads();
+        if (threadId < d) {
+            int ai = offset * (2 * threadId + 1) - 1;
+            int bi = offset * (2 * threadId + 2) - 1;
+            T t = temp[ai];
+            temp[ai] = temp[bi];
+            temp[bi] += t;
+        }
+    }
+    __syncthreads();
+
+    // Write results to device memory
+    d_output[2 * threadId] = temp[2 * threadId];
+    d_output[2 * threadId + 1] = temp[2 * threadId + 1];
+}
+
 void your_sort(unsigned int* const d_inputVals,
                unsigned int* const d_inputPos,
                unsigned int* const d_outputVals,
                unsigned int* const d_outputPos,
                const size_t numElems) {
-    // TODO
     // PUT YOUR SORT HERE
-    uint2* d_inputValsVector;
+    static constexpr unsigned int MAX_THREADS_PER_BLOCK = 1024;
+    unsigned int threads = MAX_THREADS_PER_BLOCK / 2;
+    int blocks = numElems / threads + 1;
+
+    // Compute predicate array
+    unsigned int* d_predicates;
+    const size_t elemBytes = numElems * sizeof(unsigned int);
+    checkCudaErrors(cudaMalloc((void**)&d_predicates, elemBytes));
+    checkCudaErrors(cudaMemset(d_predicates, 0, elemBytes));
+
+    predicateKernel<<<blocks, threads>>>(d_inputVals, numElems, 0, d_predicates);
+    cudaDeviceSynchronize();
+    checkCudaErrors(cudaGetLastError());
+
+    // Compute exclusive scan of predicate
+    unsigned int* d_scannedPredicate;
+    checkCudaErrors(cudaMalloc((void**)&d_scannedPredicate, elemBytes));
+    checkCudaErrors(cudaMemset(d_scannedPredicate, 0, elemBytes));
+
+    exclusiveScanKernel<<<blocks, threads>>>(d_predicates, numElems, d_scannedPredicate);
+    cudaDeviceSynchronize();
+    checkCudaErrors(cudaGetLastError());
+
+    /**uint2* d_inputValsVector;
     const size_t inputVecSize = numElems * sizeof(uint2);
     checkCudaErrors(cudaMalloc((void**)&d_inputValsVector, inputVecSize));
-
-    static constexpr unsigned int MAX_THREADS_PER_BLOCK = 1024;
-    unsigned int threads = MAX_THREADS_PER_BLOCK;
-    int blocks = numElems / threads + 1;
 
     copyToVec2<<<blocks, threads>>>(d_inputVals, numElems, d_inputValsVector);
 
@@ -166,5 +185,6 @@ void your_sort(unsigned int* const d_inputVals,
 
     std::cout << "Min = " << min << " Max = " << max << std::endl;
     /***** Clean up *****/
-    checkCudaErrors(cudaFree(d_inputValsVector));
+    checkCudaErrors(cudaFree(d_scannedPredicate));
+    checkCudaErrors(cudaFree(d_predicates));
 }

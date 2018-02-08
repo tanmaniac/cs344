@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
 project(cs344)
 
 # Only use required modules from OpenCV
-find_package(OpenCV REQUIRED core imgproc highgui)
+find_package(OpenCV REQUIRED core imgproc imgcodecs highgui)
 find_package(CUDA REQUIRED)
 
 link_libraries(${OpenCV_LIBS} )
@@ -48,10 +48,7 @@ if(CUDA_FOUND)
   endif()
 
   # add debugging to CUDA NVCC flags.  For NVidia's NSight tools.
-  # Seems to only work with CUDA 9+ for Problem Set 4
-  if (CUDA_VERSION_MAJOR GREATER 8)
-    set(CUDA_NVCC_FLAGS_DEBUG ${CUDA_NVCC_FLAGS_DEBUG} "-G")
-  endif()
+  set(CUDA_NVCC_FLAGS_DEBUG ${CUDA_NVCC_FLAGS_DEBUG} "-G")
 
   add_subdirectory (Problem\ Sets/Problem\ Set\ 1)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 2)

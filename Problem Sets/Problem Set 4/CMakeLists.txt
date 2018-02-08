@@ -12,6 +12,8 @@ SET (HW4_files main.cpp loadSaveImage.cpp reference_calc.cpp compare.cpp)
 
 # ptxas errors without this (https://stackoverflow.com/a/29604081)
 # SET(CUDA_SEPARABLE_COMPILATION ON)
+# HW4 executable crashes with "-G" debug flag turned on
+SET (CUDA_NVCC_FLAGS_DEBUG "")
 CUDA_ADD_EXECUTABLE(HW4 ${HW4_files} ${hdr} ${img} ${cu})
 
 
