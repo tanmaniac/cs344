@@ -11,6 +11,11 @@ extern void launchScanKernel(int* h_dataOut,
                              const size_t dataSize,
                              float* execTime = nullptr);
 
+extern void launchBlellochKernel(int* h_dataOut,
+                                 const int* h_dataIn,
+                                 const size_t dataSize,
+                                 float* execTime = nullptr);
+
 template <typename T, std::size_t size>
 void serialExclusiveScan(const std::array<T, size>& dataIn, std::array<T, size>& dataOut) {
     dataOut[0] = 0;
@@ -50,9 +55,10 @@ int main(int argc, char** argv) {
     }
 
     // Create input array
-    static constexpr size_t ARRAY_SIZE = 8;
+    static constexpr size_t ARRAY_SIZE = 32;
     std::array<int, ARRAY_SIZE> dataIn;
-    std::iota(dataIn.begin(), dataIn.end(), 1);
+    dataIn.fill(1);
+    // std::iota(dataIn.begin(), dataIn.end(), 1);
     std::array<int, ARRAY_SIZE> dataOut;
 
     // Run CPU implementation of exclusive scan
@@ -69,7 +75,14 @@ int main(int argc, char** argv) {
     float gpuExecTime = 0;
     launchScanKernel(gpuDataOut.data(), dataIn.data(), ARRAY_SIZE, &gpuExecTime);
 
+    std::cout << "***** Hillis-Steele Scan *****" << std::endl;
     static constexpr int NS_IN_A_MS = 1000000; // 1000000 nanoseconds in one millisecond
+    std::cout << "GPU execution took " << gpuExecTime * NS_IN_A_MS << " ns" << std::endl;
+    std::cout << "GPU result = [ " << printArray(gpuDataOut) << "]" << std::endl;
+
+    // Blelloch Scan
+    launchBlellochKernel(gpuDataOut.data(), dataIn.data(), ARRAY_SIZE, &gpuExecTime);
+    std::cout << "***** Blelloch Scan *****" << std::endl;
     std::cout << "GPU execution took " << gpuExecTime * NS_IN_A_MS << " ns" << std::endl;
     std::cout << "GPU result = [ " << printArray(gpuDataOut) << "]" << std::endl;
 

@@ -48,9 +48,9 @@
 
 // Prevent memory bank access conflicts
 // https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch39.html
-static constexpr size_t NUM_BANKS = 16;
+/*static constexpr size_t NUM_BANKS = 16;
 static constexpr size_t LOG_NUM_BANKS = 4;
-
+*/
 __device__ inline unsigned int getPosition() {
     return blockIdx.x * blockDim.x + threadIdx.x;
 }

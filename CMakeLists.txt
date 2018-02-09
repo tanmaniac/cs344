@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
 project(cs344)
 
 # Only use required modules from OpenCV
-find_package(OpenCV REQUIRED core imgproc imgcodecs highgui)
+find_package(OpenCV REQUIRED core imgproc highgui)
 find_package(CUDA REQUIRED)
 
 link_libraries(${OpenCV_LIBS} )
@@ -53,7 +53,7 @@ if(CUDA_FOUND)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 1)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 2)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 3)
-  add_subdirectory (Problem\ Sets/Problem\ Set\ 4)
+  #add_subdirectory (Problem\ Sets/Problem\ Set\ 4)
   #add_subdirectory (Problem\ Sets/Problem\ Set\ 5)
   #add_subdirectory (Problem\ Sets/Problem\ Set\ 6)
 

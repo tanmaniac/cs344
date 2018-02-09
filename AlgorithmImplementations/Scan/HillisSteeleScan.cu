@@ -56,8 +56,10 @@ void launchScanKernel(int *h_dataOut, const int *h_dataIn, const size_t dataSize
     cudaMemcpy(d_dataIn, h_dataIn, dataBytes, cudaMemcpyHostToDevice);
 
     // Execute kernel and record runtime
+    const unsigned int blocks = 1;
+    const unsigned int threads = (dataSize / 2) / blocks;
     cudaEventRecord(start);
-    exclusiveScanKernel<<<1, dataSize, 2 * dataBytes>>>(d_dataOut, d_dataIn, dataSize);
+    exclusiveScanKernel<<<blocks, threads, dataBytes>>>(d_dataOut, d_dataIn, dataSize);
     cudaEventRecord(stop);
 
     // Copy back from GPU to CPU
