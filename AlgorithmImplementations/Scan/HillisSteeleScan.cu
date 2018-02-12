@@ -34,6 +34,7 @@ __global__ void exclusiveScanKernel(T *dataOut, const T *dataIn, const size_t da
     }
     // Write to output array
     dataOut[thId] = shmData[bufA * dataSize + thId];
+    printf("Thread %d = %d\n", thId, dataOut[thId]);
 }
 
 //template <typename T>
@@ -57,7 +58,7 @@ void launchScanKernel(int *h_dataOut, const int *h_dataIn, const size_t dataSize
 
     // Execute kernel and record runtime
     const unsigned int blocks = 1;
-    const unsigned int threads = (dataSize / 2) / blocks;
+    const unsigned int threads = (dataSize) / blocks;
     cudaEventRecord(start);
     exclusiveScanKernel<<<blocks, threads, dataBytes>>>(d_dataOut, d_dataIn, dataSize);
     cudaEventRecord(stop);

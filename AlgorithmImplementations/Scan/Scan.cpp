@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     }
 
     // Create input array
-    static constexpr size_t ARRAY_SIZE = 32;
+    static constexpr size_t ARRAY_SIZE = 64;
     std::array<int, ARRAY_SIZE> dataIn;
     dataIn.fill(1);
     // std::iota(dataIn.begin(), dataIn.end(), 1);
@@ -73,12 +73,13 @@ int main(int argc, char** argv) {
     // Run GPU implementation of exclusive scan
     std::array<int, ARRAY_SIZE> gpuDataOut;
     float gpuExecTime = 0;
-    launchScanKernel(gpuDataOut.data(), dataIn.data(), ARRAY_SIZE, &gpuExecTime);
+    static constexpr int NS_IN_A_MS = 1000000; // 1000000 nanoseconds in one millisecond
+    /*launchScanKernel(gpuDataOut.data(), dataIn.data(), ARRAY_SIZE, &gpuExecTime);
 
     std::cout << "***** Hillis-Steele Scan *****" << std::endl;
-    static constexpr int NS_IN_A_MS = 1000000; // 1000000 nanoseconds in one millisecond
     std::cout << "GPU execution took " << gpuExecTime * NS_IN_A_MS << " ns" << std::endl;
     std::cout << "GPU result = [ " << printArray(gpuDataOut) << "]" << std::endl;
+    */
 
     // Blelloch Scan
     launchBlellochKernel(gpuDataOut.data(), dataIn.data(), ARRAY_SIZE, &gpuExecTime);
