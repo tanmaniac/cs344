@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     }
 
     // Create input array
-    static constexpr size_t ARRAY_SIZE = 64;
+    static constexpr size_t ARRAY_SIZE = 1069;
     std::array<int, ARRAY_SIZE> dataIn;
     dataIn.fill(1);
     // std::iota(dataIn.begin(), dataIn.end(), 1);

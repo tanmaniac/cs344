@@ -15,5 +15,3 @@ SET (HW4_files main.cpp loadSaveImage.cpp reference_calc.cpp compare.cpp)
 # HW4 executable crashes with "-G" debug flag turned on
 SET (CUDA_NVCC_FLAGS_DEBUG "")
 CUDA_ADD_EXECUTABLE(HW4 ${HW4_files} ${hdr} ${img} ${cu})
-
-
