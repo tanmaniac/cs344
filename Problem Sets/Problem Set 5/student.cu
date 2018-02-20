@@ -24,31 +24,67 @@
 
 */
 
-
 #include "utils.h"
 
-__global__
-void yourHisto(const unsigned int* const vals, //INPUT
-               unsigned int* const histo,      //OUPUT
-               int numVals)
-{
-  //TODO fill in this kernel to calculate the histogram
-  //as quickly as possible
+#include <iostream>
 
-  //Although we provide only one kernel skeleton,
-  //feel free to use more if it will help you
-  //write faster code
+__device__ inline unsigned int getPosition() {
+    return blockIdx.x * blockDim.x + threadIdx.x;
 }
 
-void computeHistogram(const unsigned int* const d_vals, //INPUT
-                      unsigned int* const d_histo,      //OUTPUT
+template <typename T>
+__global__ void naiveHistoKernel(const T* const vals, unsigned int* const histo, int numVals) {
+    unsigned int threadPos = getPosition();
+
+    if (threadPos < numVals) {
+        unsigned int bin = vals[threadPos];
+        atomicAdd(&histo[bin], 1);
+    }
+}
+
+template <typename T>
+__global__ void shmemHistoKernel(const T* const vals,
+                                 unsigned int* const histo,
+                                 int numVals,
+                                 unsigned int itersPerThread) {
+    unsigned int threadPos = getPosition();
+    unsigned int threadId = threadIdx.x;
+
+    extern __shared__ unsigned int shHisto[];
+    shHisto[threadId] = 0;
+    __syncthreads();
+
+    for (int i = 0; i < itersPerThread; i++) {
+        threadPos = blockDim.x * (i + itersPerThread * blockIdx.x) + threadIdx.x;
+        if (threadPos < numVals) {
+            unsigned int bin = vals[threadPos];
+            atomicAdd(&shHisto[bin], 1);
+        }
+    }
+    __syncthreads();
+
+    atomicAdd(&histo[threadId], shHisto[threadId]);
+}
+
+void computeHistogram(const unsigned int* const d_vals, // INPUT
+                      unsigned int* const d_histo,      // OUTPUT
                       const unsigned int numBins,
-                      const unsigned int numElems)
-{
-  //TODO Launch the yourHisto kernel
+                      const unsigned int numElems) {
+    // TODO Launch the yourHisto kernel
 
-  //if you want to use/launch more than one kernel,
-  //feel free
+    // if you want to use/launch more than one kernel,
+    // feel free
+    std::cout << "numElems = " << numElems << ", numBins = " << numBins << std::endl;
 
-  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    static constexpr size_t MAX_THREADS_PER_BLOCK = 1024;
+    static constexpr unsigned int ITERATIONS_PER_THREAD = 33;
+    const dim3 blocks(1 + (numElems / (MAX_THREADS_PER_BLOCK * ITERATIONS_PER_THREAD)));
+    const dim3 threads(MAX_THREADS_PER_BLOCK);
+    const size_t shmSize = threads.x * sizeof(unsigned int);
+    // naiveHistoKernel<<<blocks, threads>>>(d_vals, d_histo, numElems);
+    shmemHistoKernel<<<blocks, threads, shmSize>>>(
+        d_vals, d_histo, numElems, ITERATIONS_PER_THREAD);
+
+    cudaDeviceSynchronize();
+    checkCudaErrors(cudaGetLastError());
 }

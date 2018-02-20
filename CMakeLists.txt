@@ -54,7 +54,7 @@ if(CUDA_FOUND)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 2)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 3)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 4)
-  #add_subdirectory (Problem\ Sets/Problem\ Set\ 5)
+  add_subdirectory (Problem\ Sets/Problem\ Set\ 5)
   #add_subdirectory (Problem\ Sets/Problem\ Set\ 6)
 
   add_subdirectory (AlgorithmImplementations)
