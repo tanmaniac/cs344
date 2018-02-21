@@ -74,43 +74,43 @@ __global__ void shmemHistoKernel(const T* const vals,
     atomicAdd(&histo[threadId], shHisto[threadId]);
 }
 
-void thrustHistogram(const unsigned int* vals, unsigned int* histo, int numBins, int numVals) {
-    //thrust::device_ptr<unsigned int> tVals = thrust::device_pointer_cast(vals);
-    //thrust::device_vector<unsigned int> tValsVec(tVals, tVals + numVals);
-    thrust::device_vector<unsigned int> tValsVec(numVals);
-    thrust::copy(vals, vals + numVals, tValsVec.begin());
-    thrust::sort(tValsVec.begin(), tValsVec.end());
+void thrustHistogram(thrust::device_vector<unsigned int>& vals,
+                     unsigned int* histo,
+                     int numBins,
+                     int numVals) {
+    thrust::sort(vals.begin(), vals.end());
 
-    thrust::device_vector<unsigned int> tHistoVec(numBins);
+    thrust::device_ptr<unsigned int> tHisto = thrust::device_pointer_cast(histo);
 
     thrust::counting_iterator<unsigned int> searchBegin(0);
-    thrust::upper_bound(tValsVec.begin(), tValsVec.end(), searchBegin, searchBegin + numBins, tHistoVec.begin());
+    thrust::upper_bound(vals.begin(), vals.end(), searchBegin, searchBegin + numBins, tHisto);
 
-    thrust::adjacent_difference(tHistoVec.begin(), tHistoVec.end(), tHistoVec.begin());
-
-    // Copy back to histogram pointer
-    thrust::copy(tHistoVec.begin(), tHistoVec.end(), histo);
+    thrust::adjacent_difference(tHisto, tHisto + numBins, tHisto);
 }
 
 void computeHistogram(const unsigned int* const d_vals, // INPUT
                       unsigned int* const d_histo,      // OUTPUT
                       const unsigned int numBins,
-                      const unsigned int numElems) {
-    // TODO Launch the yourHisto kernel
-
-    // if you want to use/launch more than one kernel,
-    // feel free
+                      const unsigned int numElems,
+                      const cudaDeviceProp& devProps) {
     std::cout << "numElems = " << numElems << ", numBins = " << numBins << std::endl;
 
     static constexpr size_t MAX_THREADS_PER_BLOCK = 1024;
-    static constexpr unsigned int ITERATIONS_PER_THREAD = 33;
-    const dim3 blocks(1 + (numElems / (MAX_THREADS_PER_BLOCK * ITERATIONS_PER_THREAD)));
+
+    const unsigned int itersPerThread =
+        ceil(sqrt(float(numElems) /
+                  float(devProps.multiProcessorCount * devProps.maxThreadsPerMultiProcessor)));
+    std::cout << "itersPerThread = " << itersPerThread << std::endl;
+    const dim3 blocks(1 + (numElems / (MAX_THREADS_PER_BLOCK * itersPerThread)));
     const dim3 threads(MAX_THREADS_PER_BLOCK);
-    //const size_t shmSize = threads.x * sizeof(unsigned int);
+
+    // Naive histogram - uses global memory and atomic adds
     // naiveHistoKernel<<<blocks, threads>>>(d_vals, d_histo, numElems);
-    //shmemHistoKernel<<<blocks, threads, shmSize>>>(
-    //    d_vals, d_histo, numElems, ITERATIONS_PER_THREAD);
-    thrustHistogram(d_vals, d_histo, numBins, numElems);
+
+    // Shared memory based implementation - same as before, but computes iteratively:
+    // iterations = sqrt(numElems / (<num SMs> * <max num threads per block>))
+    const size_t shmSize = threads.x * sizeof(unsigned int);
+    shmemHistoKernel<<<blocks, threads, shmSize>>>(d_vals, d_histo, numElems, itersPerThread);
 
     cudaDeviceSynchronize();
     checkCudaErrors(cudaGetLastError());

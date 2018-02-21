@@ -4,7 +4,10 @@
 #include "utils.h"
 
 #include <cuda_runtime.h>
+#include <thrust/copy.h>
+#include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
+#include <thrust/sort.h>
 
 #include <cfloat>
 #include <iostream>
@@ -306,10 +309,11 @@ void copyAndPrint(unsigned int* d_predicate,
                   unsigned int* d_dataOut,
                   unsigned int* d_inputVals) {
     std::array<unsigned int, 100> predicate, notPredicate, dataOut, inputVals;
-    const size_t byteSize = 100 * sizeof (unsigned int);
+    const size_t byteSize = 100 * sizeof(unsigned int);
 
     checkCudaErrors(cudaMemcpy(predicate.data(), d_predicate, byteSize, cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaMemcpy(notPredicate.data(), d_notPredicate, byteSize, cudaMemcpyDeviceToHost));
+    checkCudaErrors(
+        cudaMemcpy(notPredicate.data(), d_notPredicate, byteSize, cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaMemcpy(dataOut.data(), d_dataOut, byteSize, cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaMemcpy(inputVals.data(), d_inputVals, byteSize, cudaMemcpyDeviceToHost));
 
@@ -407,7 +411,7 @@ void your_sort(unsigned int* const d_inputVals,
 
         uniformNotKernel<<<blocksPass1, 2 * threadsPass1>>>(d_predicate, dataSize, d_notPredicate);
         cudaDeviceSynchronize();
-        checkCudaErrors(cudaGetLastError());        
+        checkCudaErrors(cudaGetLastError());
 
         runExclusiveScan(d_predicate,
                          blocksPass1,
@@ -462,7 +466,7 @@ void your_sort(unsigned int* const d_inputVals,
         cudaDeviceSynchronize();
         checkCudaErrors(cudaGetLastError());
 
-        //copyAndPrint(d_predicate, d_notPredicate, d_dataOut, d_inputVals);
+        // copyAndPrint(d_predicate, d_notPredicate, d_dataOut, d_inputVals);
     }
 
     // Free memory
@@ -472,4 +476,21 @@ void your_sort(unsigned int* const d_inputVals,
     checkCudaErrors(cudaFree(d_incr));
     checkCudaErrors(cudaFree(d_predicate));
     checkCudaErrors(cudaFree(d_histo));
+}
+
+// Thrust's radix sort - performance benchmark (pretty much as fast as you can possibly go).
+// Measured performance on Quadro M1000M: ~1.208 ms
+void thrustSort(unsigned int* const inputVals,
+                unsigned int* const inputPos,
+                unsigned int* const outputVals,
+                unsigned int* const outputPos,
+                const size_t numElems) {
+    // make device pointers to wrap our raw pointers
+    thrust::device_ptr<unsigned int> inputValsPtr = thrust::device_pointer_cast(inputVals);
+    thrust::device_ptr<unsigned int> inputPosPtr = thrust::device_pointer_cast(inputPos);
+    // Do a stable sort where the input values are keys and the input positions are values
+    thrust::stable_sort_by_key(inputValsPtr, inputValsPtr + numElems, inputPosPtr);
+    // Copy everything into the output arrays
+    thrust::copy(inputValsPtr, inputValsPtr + numElems, outputVals);
+    thrust::copy(inputPosPtr, inputPosPtr + numElems, outputPos);
 }
