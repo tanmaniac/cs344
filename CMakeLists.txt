@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
 project(cs344)
 
 # Only use required modules from OpenCV
-find_package(OpenCV REQUIRED core imgproc highgui)
+find_package(OpenCV REQUIRED core imgproc imgcodecs highgui)
 find_package(CUDA REQUIRED)
 
 link_libraries(${OpenCV_LIBS} )
@@ -23,9 +23,6 @@ if(CUDA_FOUND)
   # about this compiler argument
   set(CUDA_NVCC_FLAGS "
   -ccbin g++;
-  -gencode;arch=compute_30,code=sm_30;  
-  -gencode;arch=compute_35,code=sm_35;
-  -gencode;arch=compute_35,code=compute_35;
   -gencode;arch=compute_50,code=sm_50;
   -gencode;arch=compute_52,code=sm_52;
   -gencode;arch=compute_60,code=sm_60;

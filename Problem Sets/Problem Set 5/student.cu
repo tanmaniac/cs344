@@ -26,6 +26,14 @@
 
 #include "utils.h"
 
+#include <thrust/adjacent_difference.h>
+#include <thrust/binary_search.h>
+#include <thrust/copy.h>
+#include <thrust/device_ptr.h>
+#include <thrust/device_vector.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/sort.h>
+
 #include <iostream>
 
 __device__ inline unsigned int getPosition() {
@@ -66,6 +74,24 @@ __global__ void shmemHistoKernel(const T* const vals,
     atomicAdd(&histo[threadId], shHisto[threadId]);
 }
 
+void thrustHistogram(const unsigned int* vals, unsigned int* histo, int numBins, int numVals) {
+    //thrust::device_ptr<unsigned int> tVals = thrust::device_pointer_cast(vals);
+    //thrust::device_vector<unsigned int> tValsVec(tVals, tVals + numVals);
+    thrust::device_vector<unsigned int> tValsVec(numVals);
+    thrust::copy(vals, vals + numVals, tValsVec.begin());
+    thrust::sort(tValsVec.begin(), tValsVec.end());
+
+    thrust::device_vector<unsigned int> tHistoVec(numBins);
+
+    thrust::counting_iterator<unsigned int> searchBegin(0);
+    thrust::upper_bound(tValsVec.begin(), tValsVec.end(), searchBegin, searchBegin + numBins, tHistoVec.begin());
+
+    thrust::adjacent_difference(tHistoVec.begin(), tHistoVec.end(), tHistoVec.begin());
+
+    // Copy back to histogram pointer
+    thrust::copy(tHistoVec.begin(), tHistoVec.end(), histo);
+}
+
 void computeHistogram(const unsigned int* const d_vals, // INPUT
                       unsigned int* const d_histo,      // OUTPUT
                       const unsigned int numBins,
@@ -80,10 +106,11 @@ void computeHistogram(const unsigned int* const d_vals, // INPUT
     static constexpr unsigned int ITERATIONS_PER_THREAD = 33;
     const dim3 blocks(1 + (numElems / (MAX_THREADS_PER_BLOCK * ITERATIONS_PER_THREAD)));
     const dim3 threads(MAX_THREADS_PER_BLOCK);
-    const size_t shmSize = threads.x * sizeof(unsigned int);
+    //const size_t shmSize = threads.x * sizeof(unsigned int);
     // naiveHistoKernel<<<blocks, threads>>>(d_vals, d_histo, numElems);
-    shmemHistoKernel<<<blocks, threads, shmSize>>>(
-        d_vals, d_histo, numElems, ITERATIONS_PER_THREAD);
+    //shmemHistoKernel<<<blocks, threads, shmSize>>>(
+    //    d_vals, d_histo, numElems, ITERATIONS_PER_THREAD);
+    thrustHistogram(d_vals, d_histo, numBins, numElems);
 
     cudaDeviceSynchronize();
     checkCudaErrors(cudaGetLastError());
