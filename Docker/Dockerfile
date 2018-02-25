@@ -1,6 +1,6 @@
 # Docker container for running my solutions to Udacity CS344 Intro to Parallel Programming code.
 
-FROM nvidia/cuda:8.0-devel-ubuntu16.04
+FROM nvidia/cudagl:9.0-devel-ubuntu16.04
 LABEL maintainers="Tanmay Bangalore <tanmaybangalore@gmail.com>"
 
 # Install OpenCV (https://github.com/BVLC/caffe/wiki/OpenCV-3.3-Installation-Guide-on-Ubuntu-16.04)
@@ -26,6 +26,23 @@ LABEL maintainers="Tanmay Bangalore <tanmaybangalore@gmail.com>"
 #    make -j $(($(nproc) + 1))
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y libopencv-dev python-opencv \
-    build-essential cmake
+    build-essential cmake sudo konsole dbus-x11 oxygen-icon-theme* clang-format
 RUN apt-get install -y --no-install-recommends cuda-samples-$CUDA_PKG_VERSION && \
     rm -rf /var/lib/apt/lists/*
+
+# Make a home directory so everything isn't just owned by root
+ARG UID=1000
+ARG GID=1000
+
+RUN mkdir -p /home/nvidia && \
+    echo "nvidia:x:${UID}:${GID}:nvidia,,,:/home/nvidia:/bin/bash" >> /etc/passwd && \
+    echo "nvidia:x:${UID}:" >> /etc/group && \
+    echo "nvidia ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/nvidia && \
+    chmod 0440 /etc/sudoers.d/nvidia && \
+    chown ${UID}:${GID} -R /home/nvidia
+RUN mkdir -p /home/nvidia/.local/share/konsole
+COPY konsole/* /home/nvidia/.local/share/konsole/
+RUN chown -R ${UID}:${GID} /home/nvidia/.local/share/konsole/
+
+USER nvidia
+ENV HOME /home/nvidia

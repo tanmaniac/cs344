@@ -11,4 +11,6 @@ file( GLOB  hdr *.hpp *.h )
 
 SET (HW6_files student_func.cu HW6.cu main.cpp loadSaveImage.cpp reference_calc.cpp compare.cpp)
 
+#SET(CUDA_SEPARABLE_COMPILATION ON)
+SET (CUDA_NVCC_FLAGS_DEBUG "")
 CUDA_ADD_EXECUTABLE(HW6 ${HW6_files} ${hdr})

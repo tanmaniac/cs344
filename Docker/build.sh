@@ -1,3 +1,5 @@
 #! /usr/bin/env bash
 
-docker build --tag nvidia/cuda:opencv .
+docker build --build-arg UID=$(id -u) \
+             --build-arg GID=$(id -g) \
+             --tag nvidia/cudagl:opencv .

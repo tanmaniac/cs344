@@ -8,8 +8,8 @@
 cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
 project(cs344)
 
-# Only use required modules from OpenCV
-find_package(OpenCV REQUIRED core imgproc imgcodecs highgui)
+# Only use required modules from OpenCV. This is different for OpenCV 3.x vs 2.x
+find_package(OpenCV REQUIRED core imgproc highgui)
 find_package(CUDA REQUIRED)
 
 link_libraries(${OpenCV_LIBS} )
@@ -28,6 +28,8 @@ if(CUDA_FOUND)
   -gencode;arch=compute_60,code=sm_60;
   -gencode;arch=compute_61,code=sm_61;
   -gencode;arch=compute_62,code=sm_62")
+
+  set(CMAKE_CXX_FLAGS_DEBUG "-DSAVE_DEBUG_IMGS -DDRAW_DEBUG_IMGS")
 
   # add -Wextra compiler flag for gcc compilations
   if (UNIX)
@@ -52,7 +54,7 @@ if(CUDA_FOUND)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 3)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 4)
   add_subdirectory (Problem\ Sets/Problem\ Set\ 5)
-  #add_subdirectory (Problem\ Sets/Problem\ Set\ 6)
+  add_subdirectory (Problem\ Sets/Problem\ Set\ 6)
 
   add_subdirectory (AlgorithmImplementations)
   add_subdirectory(external)
